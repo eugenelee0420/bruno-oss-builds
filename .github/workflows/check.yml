@@ -36,7 +36,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         if: ${{ steps.check_version.outputs.should_build == 'true' }}
         run: |
-          gh workflow run ./.github/workflows/release.yml \
+          gh workflow run release.yml \
           --repo ${{ github.repository }} \
           --ref main \
           -f tag=${{ steps.check_version.outputs.tag }}
