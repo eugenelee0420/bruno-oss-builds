@@ -9,9 +9,14 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
       - name: Check latest version
         id: check_version
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           theirs=$(bash -c 'gh release list -q .[].tagName --json tagName -R usebruno/bruno | head -n 1')
           ours=$(bash -c 'gh release list -q .[].tagName --json tagName | head -n 1')
@@ -22,9 +27,11 @@ jobs:
             echo "should_build=false" >> "$GITHUB_OUTPUT"
           fi
 
+          echo "ours: $ours, theirs: $theirs, should_build: $should_build"
+
       - name: Call build workflow
         id: call_build_workflow
         if: ${{ steps.check_version.outputs.should_build == 'true' }}
-        uses: ./release.yml
+        uses: ./.github/workflows/release.yml
         with:
           tag: ${{ steps.check_version.outputs.tag }}
