@@ -21,17 +21,22 @@ jobs:
           theirs=$(bash -c 'gh release list -q .[].tagName --json tagName -R usebruno/bruno | head -n 1')
           ours=$(bash -c 'gh release list -q .[].tagName --json tagName | head -n 1')
           if [[ "$theirs" == "$ours" ]]; then
-            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
             echo "tag=$theirs" >> "$GITHUB_OUTPUT"
           else
-            echo "should_build=false" >> "$GITHUB_OUTPUT"
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
           fi
 
           echo "ours: $ours, theirs: $theirs, should_build: $should_build"
 
       - name: Call build workflow
         id: call_build_workflow
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         if: ${{ steps.check_version.outputs.should_build == 'true' }}
-        uses: ./.github/workflows/release.yml
-        with:
-          tag: ${{ steps.check_version.outputs.tag }}
+        run: |
+          gh workflow run ./.github/workflows/release.yml \
+          --repo ${{ github.repository }} \
+          --ref main \
+          -f tag=${{ steps.check_version.outputs.tag }}
