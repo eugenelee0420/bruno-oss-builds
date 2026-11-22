@@ -24,9 +24,9 @@ jobs:
           ours=$(bash -c 'gh release list -q .[].tagName --json tagName | head -n 1')
           if [[ "$theirs" == "$ours" ]]; then
             echo "should_build=false" >> "$GITHUB_OUTPUT"
-            echo "tag=$theirs" >> "$GITHUB_OUTPUT"
           else
             echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "tag=$theirs" >> "$GITHUB_OUTPUT"
           fi
 
           echo "ours: $ours, theirs: $theirs, should_build: $should_build"
@@ -38,6 +38,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         if: ${{ steps.check_version.outputs.should_build == 'true' }}
         run: |
+          echo "Dispatching workflow to build new release, tag=${{ steps.check_version.outputs.tag }}"
           gh workflow run release.yml \
           --repo ${{ github.repository }} \
           --ref main \
