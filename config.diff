@@ -1,0 +1,15 @@
+diff --git a/packages/bruno-electron/electron-builder-config.js b/packages/bruno-electron/electron-builder-config.js
+index c27235da3..187b6a2b8 100644
+--- a/packages/bruno-electron/electron-builder-config.js
++++ b/packages/bruno-electron/electron-builder-config.js
+@@ -4,6 +4,10 @@ const isBenchmark = process.env.BRUNO_BENCHMARK === 'true';
+ 
+ const config = {
+   appId: 'com.usebruno.app',
++  // The release workflow publishes assets with `gh release create`.
++  // Without this, electron-builder auto-selects `onTagOrDraft` in CI,
++  // detects GitHub from the repository, and fails when GH_TOKEN is absent.
++  publish: null,
+   productName: isBenchmark ? 'Bruno Benchmark' : 'Bruno',
+   extraMetadata: {
+     brunoBuild: {
