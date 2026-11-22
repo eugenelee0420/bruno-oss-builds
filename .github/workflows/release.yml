@@ -86,8 +86,9 @@ jobs:
       - name: Patch electron builder config
         shell: bash
         run: |
+          curl -o oss-build-patch.diff https://raw.githubusercontent.com/eugenelee0420/bruno-oss-builds/refs/heads/main/config.diff
           set -euo pipefail
-          git apply ./config.diff
+          git apply ./oss-build-patch.diff 
           head -n 15 packages/bruno-electron/electron-builder-config.js
           git diff
 
@@ -177,8 +178,9 @@ jobs:
       - name: Patch electron builder config
         shell: bash
         run: |
+          curl -o oss-build-patch.diff https://raw.githubusercontent.com/eugenelee0420/bruno-oss-builds/refs/heads/main/config.diff
           set -euo pipefail
-          git apply ./config.diff
+          git apply ./oss-build-patch.diff 
           head -n 15 packages/bruno-electron/electron-builder-config.js
           git diff
 
