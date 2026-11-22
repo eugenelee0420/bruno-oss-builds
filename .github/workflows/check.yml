@@ -1,0 +1,30 @@
+name: Check for new release
+
+on:
+  schedule:
+    - cron: 0 0 * * 1
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check latest version
+        id: check_version
+        shell: bash
+        run: |
+          theirs=$(bash -c 'gh release list -q .[].tagName --json tagName -R usebruno/bruno | head -n 1')
+          ours=$(bash -c 'gh release list -q .[].tagName --json tagName | head -n 1')
+          if [[ "$theirs" == "$ours" ]]; then
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "tag=$theirs" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Call build workflow
+        id: call_build_workflow
+        if: ${{ steps.check_version.outputs.should_build == 'true' }}
+        uses: ./release.yml
+        with:
+          tag: ${{ steps.check_version.outputs.tag }}
