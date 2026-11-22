@@ -5,3 +5,5 @@ The binaries provided by the [upstream bruno repository](https://github.com/useb
 # What does this repo do
 
 The GitHub Action workflow in this repo builds binaries directly from the published source code with no functional changes, and uploads them to a GitHub release.
+
+Automatically checks for new releases every Monday and builds a new release if necessary.
