@@ -2,7 +2,7 @@ name: Check for new release
 
 on:
   schedule:
-    - cron: 0 0 * * 1
+    - cron: '37 0 * * 1'
   workflow_dispatch:
 
 jobs:
@@ -23,13 +23,15 @@ jobs:
           theirs=$(bash -c 'gh release list -q .[].tagName --json tagName -R usebruno/bruno | head -n 1')
           ours=$(bash -c 'gh release list -q .[].tagName --json tagName | head -n 1')
           if [[ "$theirs" == "$ours" ]]; then
+            echo "No need to build"
             echo "should_build=false" >> "$GITHUB_OUTPUT"
           else
+            echo "Need to build"
             echo "should_build=true" >> "$GITHUB_OUTPUT"
             echo "tag=$theirs" >> "$GITHUB_OUTPUT"
           fi
 
-          echo "ours: $ours, theirs: $theirs, should_build: $should_build"
+          echo "ours: $ours, theirs: $theirs"
 
       - name: Call build workflow
         id: call_build_workflow
