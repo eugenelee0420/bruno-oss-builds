@@ -163,11 +163,21 @@ jobs:
   build-windows:
     name: Build Windows artifacts
     needs: validate
-    runs-on: ubuntu-24.04
+    runs-on: windows-latest
     timeout-minutes: 90
     env:
       VERSION: ${{ needs.validate.outputs.version }}
     steps:
+      # The oss-build patch is applied with `git apply`, whose context lines are
+      # LF terminated. Checkout must not rewrite them to CRLF first.
+      - name: Disable Git line ending conversion
+        shell: pwsh
+        run: |
+          git config --global core.autocrlf false
+          if ($LASTEXITCODE -ne 0) { throw "git config failed with exit code $LASTEXITCODE" }
+          git config --global core.eol lf
+          if ($LASTEXITCODE -ne 0) { throw "git config failed with exit code $LASTEXITCODE" }
+
       - name: Checkout
         uses: actions/checkout@v6
         with:
@@ -176,73 +186,111 @@ jobs:
           ref: ${{ needs.validate.outputs.tag }}
 
       - name: Patch electron builder config
-        shell: bash
+        shell: pwsh
         run: |
-          curl -o oss-build-patch.diff https://raw.githubusercontent.com/eugenelee0420/bruno-oss-builds/refs/heads/main/config.diff
-          set -euo pipefail
-          git apply ./oss-build-patch.diff 
-          head -n 15 packages/bruno-electron/electron-builder-config.js
+          Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/eugenelee0420/bruno-oss-builds/refs/heads/main/config.diff' -OutFile 'oss-build-patch.diff'
+          git apply ./oss-build-patch.diff
+          if ($LASTEXITCODE -ne 0) { throw "git apply failed with exit code $LASTEXITCODE" }
+          Get-Content -Path 'packages/bruno-electron/electron-builder-config.js' -TotalCount 15
           git diff
-
-      - name: Install Wine
-        run: |
-          sudo dpkg --add-architecture i386
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends wine wine64 wine32:i386
-
-      - name: Verify Wine
-        run: |
-          command -v wine
-          wine --version
+          if ($LASTEXITCODE -ne 0) { throw "git diff failed with exit code $LASTEXITCODE" }
 
       - name: Setup Node Dependencies
         uses: ./.github/actions/common/setup-node-deps
+        with:
+          shell: pwsh
 
       - name: Set release version
-        shell: bash
+        shell: pwsh
         run: |
-          set -euo pipefail
-          npm pkg set version="$VERSION" --workspace=packages/bruno-electron
-          grep -Fq "\"version\": \"$VERSION\"" packages/bruno-electron/package.json
+          npm pkg set "version=$env:VERSION" --workspace=packages/bruno-electron
+          if ($LASTEXITCODE -ne 0) { throw "npm pkg set failed with exit code $LASTEXITCODE" }
+          $expected = '"version": "' + $env:VERSION + '"'
+          if (-not (Select-String -Path 'packages/bruno-electron/package.json' -Pattern $expected -SimpleMatch -Quiet)) {
+            throw "packages/bruno-electron/package.json does not contain $expected"
+          }
 
       - name: Add Windows PTY binaries
-        shell: bash
+        shell: pwsh
         run: |
-          set -euo pipefail
-          npm i --no-save --force --legacy-peer-deps \
-            @lydell/node-pty-win32-x64@1.1.0 \
-            @lydell/node-pty-win32-arm64@1.1.0
-          test -f node_modules/@lydell/node-pty-win32-x64/conpty.node
-          test -f node_modules/@lydell/node-pty-win32-arm64/conpty.node
+          npm i --no-save --force --legacy-peer-deps `
+            '@lydell/node-pty-win32-x64@1.1.0' `
+            '@lydell/node-pty-win32-arm64@1.1.0'
+          if ($LASTEXITCODE -ne 0) { throw "npm install of node-pty binaries failed with exit code $LASTEXITCODE" }
+          foreach ($binary in @('node_modules/@lydell/node-pty-win32-x64/conpty.node', 'node_modules/@lydell/node-pty-win32-arm64/conpty.node')) {
+            if (-not (Test-Path -LiteralPath $binary)) { throw "Missing $binary" }
+          }
 
       - name: Cache Electron and electron-builder
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cache/electron
-            ~/.cache/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
           key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
 
       - name: Build renderer
+        shell: pwsh
         run: npm run build:web
 
+      # Port of scripts/build-electron.sh (used by build:electron:win), which is
+      # a bash script npm cannot execute on Windows.
+      - name: Assemble renderer into Electron web directory
+        shell: pwsh
+        run: |
+          $distDir = 'packages/bruno-app/dist'
+          $webDir = 'packages/bruno-electron/web'
+
+          if (-not (Test-Path -LiteralPath $distDir)) { throw "Renderer build output missing at $distDir" }
+
+          if (Test-Path -LiteralPath 'packages/bruno-electron/out') {
+            Remove-Item -LiteralPath 'packages/bruno-electron/out' -Recurse -Force
+          }
+          if (Test-Path -LiteralPath $webDir) {
+            Remove-Item -LiteralPath $webDir -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $webDir -Force | Out-Null
+
+          Copy-Item -Path "$distDir/*" -Destination $webDir -Recurse -Force
+
+          # Serve the bundled renderer relative to the file:// URL inside the asar.
+          $htmlFiles = Get-ChildItem -Path $webDir -Filter '*.html' -File
+          foreach ($html in $htmlFiles) {
+            $content = Get-Content -LiteralPath $html.FullName -Raw
+            $content = $content.Replace('/static/', 'static/')
+            Set-Content -LiteralPath $html.FullName -Value $content -NoNewline
+          }
+
+          $cssDir = Join-Path $webDir 'static/css'
+          if (Test-Path -LiteralPath $cssDir) {
+            foreach ($css in (Get-ChildItem -Path $cssDir -Filter '*.css' -File)) {
+              $content = Get-Content -LiteralPath $css.FullName -Raw
+              $content = $content.Replace('/static/font', '../../static/font')
+              Set-Content -LiteralPath $css.FullName -Value $content -NoNewline
+            }
+          }
+
+          $sourceMaps = Get-ChildItem -Path $webDir -Filter '*.map' -File -Recurse
+          foreach ($map in $sourceMaps) { Remove-Item -LiteralPath $map.FullName -Force }
+
+          Write-Host "Prepared $((Get-ChildItem -Path $webDir -Recurse -File).Count) renderer files in $webDir"
+
       - name: Build Windows installers
-        run: npm run build:electron:win
+        shell: pwsh
+        run: npm run dist:win --workspace=packages/bruno-electron
 
       - name: Verify Windows artifacts
-        shell: bash
+        shell: pwsh
         run: |
-          set -euo pipefail
-          cd packages/bruno-electron/out
-          for arch in x64 arm64; do
-            file="bruno_${VERSION}_${arch}_win.exe"
-            if [ ! -f "$file" ]; then
-              echo "::error::Missing $file"
-              ls -la
-              exit 1
-            fi
-          done
-          echo "Verified Windows installers for $VERSION"
+          $outDir = 'packages/bruno-electron/out'
+          foreach ($arch in @('x64', 'arm64')) {
+            $file = Join-Path $outDir "bruno_$($env:VERSION)_$($arch)_win.exe"
+            if (-not (Test-Path -LiteralPath $file)) {
+              Get-ChildItem -LiteralPath $outDir | Format-Table Name, Length | Out-String | Write-Host
+              throw "Missing $file"
+            }
+          }
+          Write-Host "Verified Windows installers for $env:VERSION"
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
